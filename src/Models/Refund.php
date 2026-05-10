@@ -2,12 +2,15 @@
 
 namespace Th3JK\Treasurer\Models;
 
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Th3JK\Treasurer\Enums\RefundState;
 
 class Refund extends Model
 {
+    use HasUuids;
+
     protected $fillable = [
         'payment_id',
         'provider',

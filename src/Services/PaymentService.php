@@ -47,7 +47,7 @@ class PaymentService
             return $payment;
         });
 
-        $payment->setAttribute('redirect_url', $response->redirectUrl);
+        $payment->redirect_url = $response->redirectUrl;
 
         $this->dispatcher->dispatch(new PaymentCreated($payment));
 

@@ -46,7 +46,7 @@ class ComgateGateway implements Gateway, SupportsCancellation, SupportsPayments,
             ->setReferenceId($request->referenceId)
             ->setLang($request->language->comgate())
             ->setCountry('CZ')
-            ->setMethod($request->method?->comgate() ?? 'ALL')
+            ->setMethods([$request->method?->comgate() ?? 'ALL'])
             ->setTest($this->isSandbox())
             ->setUrlPaidRedirect($request->returnUrl)
             ->setUrlCancelledRedirect($request->returnUrl)

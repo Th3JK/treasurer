@@ -31,6 +31,13 @@ class Payment extends Model
         'metadata' => 'array',
     ];
 
+    /**
+     * Transient (non-persisted) gateway redirect URL.
+     * Populated by PaymentService::create() so the caller can redirect
+     * the customer without an extra status round-trip.
+     */
+    public ?string $redirect_url = null;
+
     public function events(): HasMany
     {
         return $this->hasMany(PaymentEvent::class);
