@@ -7,12 +7,15 @@ use Comgate\SDK\Comgate;
 use Comgate\SDK\Entity\Codes\PaymentStatusCode;
 use Comgate\SDK\Entity\Money;
 use Comgate\SDK\Entity\Payment as ComgatePayment;
+use Comgate\SDK\Entity\PaymentNotification;
 use Comgate\SDK\Entity\Refund as ComgateRefund;
 use Comgate\SDK\Exception\ApiException;
+use Illuminate\Http\Request;
 use Th3JK\Treasurer\Contracts\Gateway;
 use Th3JK\Treasurer\Contracts\SupportsCancellation;
 use Th3JK\Treasurer\Contracts\SupportsPayments;
 use Th3JK\Treasurer\Contracts\SupportsRefunds;
+use Th3JK\Treasurer\Contracts\SupportsWebhooks;
 use Th3JK\Treasurer\DTOs\PaymentRequest;
 use Th3JK\Treasurer\DTOs\PaymentResponse;
 use Th3JK\Treasurer\DTOs\RefundRequest;
@@ -20,10 +23,12 @@ use Th3JK\Treasurer\DTOs\RefundResponse;
 use Th3JK\Treasurer\Enums\Currency;
 use Th3JK\Treasurer\Enums\PaymentState;
 use Th3JK\Treasurer\Enums\RefundState;
+use Th3JK\Treasurer\Enums\WebhookEventKind;
 use Th3JK\Treasurer\Exceptions\GatewayException;
+use Th3JK\Treasurer\Webhooks\WebhookEvent;
 use Throwable;
 
-class ComgateGateway implements Gateway, SupportsCancellation, SupportsPayments, SupportsRefunds
+class ComgateGateway implements Gateway, SupportsCancellation, SupportsPayments, SupportsRefunds, SupportsWebhooks
 {
     public const NAME = 'comgate';
 
@@ -45,7 +50,7 @@ class ComgateGateway implements Gateway, SupportsCancellation, SupportsPayments,
             ->setLabel($request->description)
             ->setReferenceId($request->referenceId)
             ->setLang($request->language->comgate())
-            ->setCountry('CZ')
+            ->setCountry($request->country ?? 'CZ')
             ->setMethods([$request->method?->comgate() ?? 'ALL'])
             ->setTest($this->isSandbox())
             ->setUrlPaidRedirect($request->returnUrl)
@@ -131,6 +136,34 @@ class ComgateGateway implements Gateway, SupportsCancellation, SupportsPayments,
         } catch (Throwable $e) {
             throw $this->wrap($e, 'cancel payment');
         }
+    }
+
+    public function verifySignature(Request $request): bool
+    {
+        $expected = (string) ($this->config['credentials']['secret'] ?? '');
+        $provided = (string) $request->input('secret', '');
+
+        return $expected !== '' && hash_equals($expected, $provided);
+    }
+
+    public function parseEvent(Request $request): ?WebhookEvent
+    {
+        $body = $request->all();
+        $notification = PaymentNotification::createFrom($body);
+
+        $transId = $notification->getTransactionId();
+        if (! is_string($transId) || $transId === '') {
+            return null;
+        }
+
+        $native = (string) ($notification->getStatus() ?? '');
+
+        return new WebhookEvent(
+            kind: WebhookEventKind::PAYMENT_NOTIFICATION,
+            paymentId: $transId,
+            paymentState: $native !== '' ? $this->mapState($native) : null,
+            raw: $body,
+        );
     }
 
     private function client(): Client

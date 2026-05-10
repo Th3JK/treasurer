@@ -12,12 +12,14 @@ use Comgate\SDK\Entity\Response\PaymentStatusResponse;
 use Comgate\SDK\Entity\Response\RefundResponse as ComgateRefundResponse;
 use Comgate\SDK\Exception\ApiException;
 use Comgate\SDK\Http\Response as ComgateHttpResponse;
+use Illuminate\Http\Request;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use Th3JK\Treasurer\Contracts\SupportsCancellation;
 use Th3JK\Treasurer\Contracts\SupportsPayments;
 use Th3JK\Treasurer\Contracts\SupportsRefunds;
+use Th3JK\Treasurer\Contracts\SupportsWebhooks;
 use Th3JK\Treasurer\Drivers\Comgate\ComgateGateway;
 use Th3JK\Treasurer\DTOs\PaymentRequest;
 use Th3JK\Treasurer\DTOs\RefundRequest;
@@ -26,6 +28,7 @@ use Th3JK\Treasurer\Enums\Language;
 use Th3JK\Treasurer\Enums\PaymentMethod;
 use Th3JK\Treasurer\Enums\PaymentState;
 use Th3JK\Treasurer\Enums\RefundState;
+use Th3JK\Treasurer\Enums\WebhookEventKind;
 use Th3JK\Treasurer\Exceptions\GatewayException;
 use Throwable;
 
@@ -39,7 +42,82 @@ class ComgateGatewayTest extends TestCase
         $this->assertInstanceOf(SupportsPayments::class, $gateway);
         $this->assertInstanceOf(SupportsRefunds::class, $gateway);
         $this->assertInstanceOf(SupportsCancellation::class, $gateway);
+        $this->assertInstanceOf(SupportsWebhooks::class, $gateway);
         $this->assertSame('comgate', $gateway->getName());
+    }
+
+    #[Test]
+    public function it_forwards_country_into_comgate_payment_when_provided(): void
+    {
+        $gateway = new ComgateGateway($this->config());
+        $this->injectClient($gateway, $this->capturingClient());
+
+        $request = new PaymentRequest(
+            referenceId: 'ORDER-2',
+            amountInCents: 100,
+            currency: Currency::EUR,
+            description: 'Test',
+            language: Language::EN,
+            returnUrl: 'https://example.test/return',
+            notificationUrl: 'https://example.test/notify',
+            country: 'DE',
+        );
+
+        $gateway->createPayment($request);
+
+        $reflection = new ReflectionProperty($gateway, 'client');
+        $client = $reflection->getValue($gateway);
+        $this->assertSame('DE', $client->captured->getCountry());
+    }
+
+    #[Test]
+    public function it_defaults_country_to_cz_when_request_does_not_specify_one(): void
+    {
+        $gateway = new ComgateGateway($this->config());
+        $this->injectClient($gateway, $this->capturingClient());
+
+        $gateway->createPayment($this->paymentRequest());
+
+        $reflection = new ReflectionProperty($gateway, 'client');
+        $client = $reflection->getValue($gateway);
+        $this->assertSame('CZ', $client->captured->getCountry());
+    }
+
+    #[Test]
+    public function it_verifies_signature_against_the_configured_secret(): void
+    {
+        $gateway = new ComgateGateway($this->config());
+
+        $this->assertTrue($gateway->verifySignature(Request::create('/webhook', 'POST', ['secret' => 'secret-1'])));
+        $this->assertFalse($gateway->verifySignature(Request::create('/webhook', 'POST', ['secret' => 'wrong'])));
+        $this->assertFalse($gateway->verifySignature(Request::create('/webhook', 'POST', [])));
+    }
+
+    #[Test]
+    public function it_parses_a_webhook_event_from_form_body(): void
+    {
+        $gateway = new ComgateGateway($this->config());
+
+        $event = $gateway->parseEvent(Request::create('/webhook', 'POST', [
+            'transId' => 'cg-trans-9',
+            'status' => PaymentStatusCode::PAID,
+            'secret' => 'secret-1',
+        ]));
+
+        $this->assertNotNull($event);
+        $this->assertSame(WebhookEventKind::PAYMENT_NOTIFICATION, $event->kind);
+        $this->assertSame('cg-trans-9', $event->paymentId);
+        $this->assertSame(PaymentState::PAID, $event->paymentState);
+    }
+
+    #[Test]
+    public function it_returns_null_when_webhook_payload_has_no_trans_id(): void
+    {
+        $gateway = new ComgateGateway($this->config());
+
+        $this->assertNull($gateway->parseEvent(Request::create('/webhook', 'POST', [
+            'secret' => 'secret-1',
+        ])));
     }
 
     #[Test]
@@ -196,6 +274,33 @@ class ComgateGatewayTest extends TestCase
                 }
 
                 return $this->cancelResponse;
+            }
+        };
+    }
+
+    private function capturingClient(): Client
+    {
+        return new class extends Client
+        {
+            public ?Payment $captured = null;
+
+            public function __construct() {}
+
+            public function createPayment(Payment $payment): PaymentCreateResponse
+            {
+                $this->captured = $payment;
+
+                $http = new class('{"code":0,"message":"OK","transId":"cg-1","redirect":"r"}') extends ComgateHttpResponse
+                {
+                    public function __construct(public string $body) {}
+
+                    public function getContent(): string
+                    {
+                        return $this->body;
+                    }
+                };
+
+                return new PaymentCreateResponse($http);
             }
         };
     }

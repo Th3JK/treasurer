@@ -38,6 +38,7 @@ return [
                 'notification' => env('GOPAY_NOTIFICATION_URL'),
             ],
             'webhooks' => [
+                'token' => env('GOPAY_WEBHOOK_TOKEN'),
                 'secret' => env('GOPAY_WEBHOOK_SECRET'),
             ],
             'options' => [
@@ -58,6 +59,7 @@ return [
                 'api' => env('COMGATE_API_URL'),
             ],
             'webhooks' => [
+                'token' => env('COMGATE_WEBHOOK_TOKEN'),
                 'secret' => env('COMGATE_WEBHOOK_SECRET'),
             ],
             'options' => [

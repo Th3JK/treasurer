@@ -1,4 +1,7 @@
 <?php
 
-Route::post('payments/{gateway}/webhook/{token}')->name('payments.webhook');
-Route::get('payments/{gateway}/webhook/{token}')->name('payments.webhook');
+use Illuminate\Support\Facades\Route;
+use Th3JK\Treasurer\Http\Controllers\WebhookController;
+
+Route::match(['GET', 'POST'], 'treasurer/webhooks/{gateway}/{token}', WebhookController::class)
+    ->name('treasurer.webhook');

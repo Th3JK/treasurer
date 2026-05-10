@@ -5,10 +5,12 @@ namespace Th3JK\Treasurer\Drivers\GoPay;
 use GoPay\Definition\Response\PaymentStatus;
 use GoPay\Http\Response;
 use GoPay\Payments;
+use Illuminate\Http\Request;
 use Th3JK\Treasurer\Contracts\Gateway;
 use Th3JK\Treasurer\Contracts\SupportsCancellation;
 use Th3JK\Treasurer\Contracts\SupportsPayments;
 use Th3JK\Treasurer\Contracts\SupportsRefunds;
+use Th3JK\Treasurer\Contracts\SupportsWebhooks;
 use Th3JK\Treasurer\DTOs\PaymentRequest;
 use Th3JK\Treasurer\DTOs\PaymentResponse;
 use Th3JK\Treasurer\DTOs\RefundRequest;
@@ -16,9 +18,11 @@ use Th3JK\Treasurer\DTOs\RefundResponse;
 use Th3JK\Treasurer\Enums\Currency;
 use Th3JK\Treasurer\Enums\PaymentState;
 use Th3JK\Treasurer\Enums\RefundState;
+use Th3JK\Treasurer\Enums\WebhookEventKind;
 use Th3JK\Treasurer\Exceptions\GatewayException;
+use Th3JK\Treasurer\Webhooks\WebhookEvent;
 
-class GoPayGateway implements Gateway, SupportsCancellation, SupportsPayments, SupportsRefunds
+class GoPayGateway implements Gateway, SupportsCancellation, SupportsPayments, SupportsRefunds, SupportsWebhooks
 {
     public const NAME = 'gopay';
 
@@ -52,6 +56,10 @@ class GoPayGateway implements Gateway, SupportsCancellation, SupportsPayments, S
 
         if ($request->email !== null) {
             $payload['payer']['contact']['email'] = $request->email;
+        }
+
+        if ($request->country !== null) {
+            $payload['payer']['contact']['country_code'] = $request->country;
         }
 
         if ($request->method !== null) {
@@ -111,6 +119,34 @@ class GoPayGateway implements Gateway, SupportsCancellation, SupportsPayments, S
     public function cancelPayment(string $paymentId): bool
     {
         return $this->payments()->voidAuthorization($paymentId)->hasSucceed();
+    }
+
+    public function verifySignature(Request $request): bool
+    {
+        // GoPay does not sign webhook notifications. The notification URL
+        // path itself carries a per-installation secret token, which is
+        // verified by WebhookController before this method is called.
+        return true;
+    }
+
+    public function parseEvent(Request $request): ?WebhookEvent
+    {
+        $id = $request->query('id') ?? $request->input('id');
+
+        if (! is_string($id) && ! is_numeric($id)) {
+            return null;
+        }
+
+        $id = (string) $id;
+        if ($id === '') {
+            return null;
+        }
+
+        return new WebhookEvent(
+            kind: WebhookEventKind::PAYMENT_NOTIFICATION,
+            paymentId: $id,
+            raw: $request->all(),
+        );
     }
 
     private function payments(): Payments

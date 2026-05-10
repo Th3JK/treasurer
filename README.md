@@ -1,8 +1,6 @@
 # Treasurer
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/th3jk/treasurer.svg?style=flat-square)](https://packagist.org/packages/th3jk/treasurer)
 [![Tests](https://img.shields.io/github/actions/workflow/status/th3jk/treasurer/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/th3jk/treasurer/actions/workflows/run-tests.yml)
-[![Total Downloads](https://img.shields.io/packagist/dt/th3jk/treasurer.svg?style=flat-square)](https://packagist.org/packages/th3jk/treasurer)
 
 A Laravel package that wraps multiple payment gateways behind one
 gateway-agnostic API. Configure one active gateway (GoPay or Comgate) and

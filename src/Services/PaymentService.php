@@ -24,6 +24,7 @@ class PaymentService
         private PaymentEventService $events,
         private Dispatcher $dispatcher,
         private ConnectionInterface $connection,
+        private RefundService $refunds,
     ) {}
 
     public function create(PaymentRequest $request): Payment
@@ -58,6 +59,11 @@ class PaymentService
     {
         $gateway = $this->ensurePayments();
         $response = $gateway->getPayment($payment->provider_payment_id);
+
+        // Refund finalisation can fire even when the mapped payment state
+        // does not visibly change (e.g. GoPay PAID → PARTIALLY_REFUNDED both
+        // map to PaymentState::PAID).
+        $this->refunds->reconcileFor($payment, $response);
 
         $previousState = $payment->status;
 

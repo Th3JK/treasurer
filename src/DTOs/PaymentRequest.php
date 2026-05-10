@@ -19,5 +19,6 @@ final readonly class PaymentRequest
         public ?string $email = null,
         public ?PaymentMethod $method = null,
         public array $metadata = [],
+        public ?string $country = null,
     ) {}
 }

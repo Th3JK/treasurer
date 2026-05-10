@@ -11,9 +11,11 @@ use Th3JK\Treasurer\Enums\Currency;
 use Th3JK\Treasurer\Enums\Language;
 use Th3JK\Treasurer\Enums\PaymentMethod;
 use Th3JK\Treasurer\Enums\PaymentState;
+use Th3JK\Treasurer\Enums\RefundState;
 use Th3JK\Treasurer\Events\Payments\PaymentCreated;
 use Th3JK\Treasurer\Events\Payments\PaymentPaid;
 use Th3JK\Treasurer\Events\Payments\PaymentPending;
+use Th3JK\Treasurer\Events\Refunds\RefundSucceeded;
 use Th3JK\Treasurer\Models\Payment;
 use Th3JK\Treasurer\Services\PaymentService;
 use Th3JK\Treasurer\Tests\Feature\Fixtures\StubGateway;
@@ -110,6 +112,87 @@ class PaymentServiceTest extends TestCase
             'id' => $payment->id,
             'status' => 'paid',
         ]);
+    }
+
+    #[Test]
+    public function it_finalises_pending_gopay_refunds_when_status_reports_refunded(): void
+    {
+        $payment = Payment::create([
+            'provider' => 'gopay',
+            'provider_payment_id' => 'gp-77',
+            'amount' => 199.00,
+            'currency' => 'CZK',
+            'status' => PaymentState::PAID,
+            'method' => null,
+            'metadata' => [],
+        ]);
+
+        $refund = $payment->refunds()->create([
+            'provider' => 'gopay',
+            'provider_refund_id' => 'rf-77',
+            'amount' => 199.00,
+            'currency' => 'CZK',
+            'status' => RefundState::REQUESTED,
+            'reason' => null,
+        ]);
+
+        Event::fake([RefundSucceeded::class]);
+
+        $this->stub->getResponse = new PaymentResponse(
+            paymentId: 'gp-77',
+            state: PaymentState::PAID,
+            amountInCents: 19900,
+            currency: Currency::CZK,
+            provider: 'gopay',
+            raw: ['id' => 'gp-77', 'state' => 'REFUNDED'],
+        );
+
+        $this->app->make(PaymentService::class)->refresh($payment);
+
+        $this->assertSame(RefundState::SUCCESS, $refund->fresh()->status);
+        Event::assertDispatched(
+            RefundSucceeded::class,
+            fn (RefundSucceeded $e) => $e->refund->id === $refund->id,
+        );
+    }
+
+    #[Test]
+    public function it_does_not_finalise_refunds_for_non_gopay_providers(): void
+    {
+        $payment = Payment::create([
+            'provider' => 'comgate',
+            'provider_payment_id' => 'cg-77',
+            'amount' => 199.00,
+            'currency' => 'CZK',
+            'status' => PaymentState::PAID,
+            'method' => null,
+            'metadata' => [],
+        ]);
+
+        $refund = $payment->refunds()->create([
+            'provider' => 'comgate',
+            'provider_refund_id' => null,
+            'amount' => 199.00,
+            'currency' => 'CZK',
+            'status' => RefundState::REQUESTED,
+            'reason' => null,
+        ]);
+
+        Event::fake([RefundSucceeded::class]);
+
+        $this->stub->getResponse = new PaymentResponse(
+            paymentId: 'cg-77',
+            state: PaymentState::PAID,
+            amountInCents: 19900,
+            currency: Currency::CZK,
+            provider: 'comgate',
+            raw: ['state' => 'REFUNDED'],
+        );
+
+        $this->app->make(PaymentService::class)->refresh($payment);
+
+        $this->assertSame(RefundState::REQUESTED, $refund->fresh()->status);
+        Event::assertNotDispatched(RefundSucceeded::class);
     }
 
     private function paymentRequest(): PaymentRequest

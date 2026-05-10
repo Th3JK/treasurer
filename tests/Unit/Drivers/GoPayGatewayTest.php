@@ -5,12 +5,14 @@ namespace Th3JK\Treasurer\Tests\Unit\Drivers;
 use GoPay\Definition\Response\PaymentStatus;
 use GoPay\Http\Response;
 use GoPay\Payments;
+use Illuminate\Http\Request;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use ReflectionProperty;
 use Th3JK\Treasurer\Contracts\SupportsCancellation;
 use Th3JK\Treasurer\Contracts\SupportsPayments;
 use Th3JK\Treasurer\Contracts\SupportsRefunds;
+use Th3JK\Treasurer\Contracts\SupportsWebhooks;
 use Th3JK\Treasurer\Drivers\GoPay\GoPayGateway;
 use Th3JK\Treasurer\DTOs\PaymentRequest;
 use Th3JK\Treasurer\DTOs\RefundRequest;
@@ -19,6 +21,7 @@ use Th3JK\Treasurer\Enums\Language;
 use Th3JK\Treasurer\Enums\PaymentMethod;
 use Th3JK\Treasurer\Enums\PaymentState;
 use Th3JK\Treasurer\Enums\RefundState;
+use Th3JK\Treasurer\Enums\WebhookEventKind;
 use Th3JK\Treasurer\Exceptions\GatewayException;
 
 class GoPayGatewayTest extends TestCase
@@ -31,7 +34,81 @@ class GoPayGatewayTest extends TestCase
         $this->assertInstanceOf(SupportsPayments::class, $gateway);
         $this->assertInstanceOf(SupportsRefunds::class, $gateway);
         $this->assertInstanceOf(SupportsCancellation::class, $gateway);
+        $this->assertInstanceOf(SupportsWebhooks::class, $gateway);
         $this->assertSame('gopay', $gateway->getName());
+    }
+
+    #[Test]
+    public function it_forwards_country_into_payer_contact_when_provided(): void
+    {
+        $gateway = new GoPayGateway($this->config());
+        $fake = $this->fakePayments(create: $this->goPayResponse(200, [
+            'id' => 1,
+            'state' => PaymentStatus::CREATED,
+            'amount' => 1,
+            'gw_url' => 'https://...',
+        ]));
+        $this->injectPayments($gateway, $fake);
+
+        $request = new PaymentRequest(
+            referenceId: 'ORDER-2',
+            amountInCents: 100,
+            currency: Currency::EUR,
+            description: 'Test',
+            language: Language::EN,
+            returnUrl: 'https://example.test/return',
+            notificationUrl: 'https://example.test/notify',
+            country: 'DE',
+        );
+
+        $gateway->createPayment($request);
+
+        $this->assertSame('DE', $fake->lastCreatePayload['payer']['contact']['country_code'] ?? null);
+    }
+
+    #[Test]
+    public function it_omits_country_when_not_provided(): void
+    {
+        $gateway = new GoPayGateway($this->config());
+        $fake = $this->fakePayments(create: $this->goPayResponse(200, [
+            'id' => 1,
+            'state' => PaymentStatus::CREATED,
+            'amount' => 1,
+            'gw_url' => 'https://...',
+        ]));
+        $this->injectPayments($gateway, $fake);
+
+        $gateway->createPayment($this->paymentRequest());
+
+        $this->assertArrayNotHasKey('country_code', $fake->lastCreatePayload['payer']['contact'] ?? []);
+    }
+
+    #[Test]
+    public function it_verifies_signature_unconditionally_since_gopay_does_not_sign(): void
+    {
+        $gateway = new GoPayGateway($this->config());
+
+        $this->assertTrue($gateway->verifySignature(Request::create('/webhook', 'GET')));
+    }
+
+    #[Test]
+    public function it_parses_a_webhook_event_from_the_id_query_parameter(): void
+    {
+        $gateway = new GoPayGateway($this->config());
+
+        $event = $gateway->parseEvent(Request::create('/webhook?id=9876543', 'GET'));
+
+        $this->assertNotNull($event);
+        $this->assertSame(WebhookEventKind::PAYMENT_NOTIFICATION, $event->kind);
+        $this->assertSame('9876543', $event->paymentId);
+    }
+
+    #[Test]
+    public function it_returns_null_when_webhook_has_no_id(): void
+    {
+        $gateway = new GoPayGateway($this->config());
+
+        $this->assertNull($gateway->parseEvent(Request::create('/webhook', 'GET')));
     }
 
     #[Test]
@@ -167,6 +244,8 @@ class GoPayGatewayTest extends TestCase
     ): Payments {
         return new class($create, $status, $refund) extends Payments
         {
+            public array $lastCreatePayload = [];
+
             public function __construct(
                 public ?Response $createResponse,
                 public ?Response $statusResponse,
@@ -175,6 +254,8 @@ class GoPayGatewayTest extends TestCase
 
             public function createPayment(array $rawPayment)
             {
+                $this->lastCreatePayload = $rawPayment;
+
                 return $this->createResponse;
             }
 
