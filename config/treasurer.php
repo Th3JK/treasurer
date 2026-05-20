@@ -10,6 +10,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Debug Logging
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, gateway drivers forward outbound HTTP requests and
+    | responses to any logger the host application binds (for example a
+    | Telescope-aware GoPay\Http\Log\Logger implementation). Leave disabled
+    | in production unless you are actively diagnosing gateway traffic, as
+    | full payloads may include personally identifiable information.
+    |
+    */
+    'debug' => filter_var(env('TREASURER_DEBUG', false), FILTER_VALIDATE_BOOL),
+
+    /*
+    |--------------------------------------------------------------------------
     | Shared Defaults
     |--------------------------------------------------------------------------
     */

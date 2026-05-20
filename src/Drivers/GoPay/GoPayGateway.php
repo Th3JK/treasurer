@@ -3,8 +3,10 @@
 namespace Th3JK\Treasurer\Drivers\GoPay;
 
 use GoPay\Definition\Response\PaymentStatus;
+use GoPay\Http\Log\Logger as GoPayLogger;
 use GoPay\Http\Response;
 use GoPay\Payments;
+use Illuminate\Container\Container;
 use Illuminate\Http\Request;
 use Th3JK\Treasurer\Contracts\Gateway;
 use Th3JK\Treasurer\Contracts\SupportsCancellation;
@@ -151,14 +153,52 @@ class GoPayGateway implements Gateway, SupportsCancellation, SupportsPayments, S
 
     private function payments(): Payments
     {
-        return $this->payments ??= \GoPay\payments([
+        if ($this->payments !== null) {
+            return $this->payments;
+        }
+
+        $services = [];
+        $logger = $this->resolveLogger();
+
+        if ($logger !== null) {
+            $services['logger'] = $logger;
+        }
+
+        return $this->payments = \GoPay\payments([
             'goid' => $this->config['credentials']['goid'] ?? null,
             'clientId' => $this->config['credentials']['client_id'] ?? null,
             'clientSecret' => $this->config['credentials']['client_secret'] ?? null,
             'gatewayUrl' => $this->resolveGatewayUrl(),
             'language' => $this->config['options']['language'] ?? 'EN',
             'timeout' => (int) ($this->config['options']['timeout'] ?? 30),
-        ]);
+        ], $services);
+    }
+
+    /**
+     * Resolve an optional HTTP logger for the GoPay SDK. Returns null unless
+     * treasurer.debug is enabled AND the host application has bound a
+     * GoPay\Http\Log\Logger implementation. Without a logger the SDK falls
+     * back to its default NullLogger.
+     */
+    private function resolveLogger(): ?GoPayLogger
+    {
+        $container = Container::getInstance();
+
+        if (! $container->bound('config')) {
+            return null;
+        }
+
+        if (! (bool) $container->make('config')->get('treasurer.debug', false)) {
+            return null;
+        }
+
+        if (! $container->bound(GoPayLogger::class)) {
+            return null;
+        }
+
+        $logger = $container->make(GoPayLogger::class);
+
+        return $logger instanceof GoPayLogger ? $logger : null;
     }
 
     private function resolveGatewayUrl(): string
